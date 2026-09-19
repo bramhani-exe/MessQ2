@@ -1,0 +1,6 @@
+{
+  "name": "MessQ",
+  "description": "Real-time LH2 Mess crowd status and daily dining menu for students.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

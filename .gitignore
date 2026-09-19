@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.local
+.vercel/
+server/queue-state.json
+tsconfig.tsbuildinfo
