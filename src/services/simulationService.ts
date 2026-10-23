@@ -17,10 +17,10 @@ export class SimulationEngine {
     serviceSpeedSeconds: 28
   };
 
-  private currentQueue: number = 17;
-  private peakToday: number = 28;
-  private averageToday: number = 14;
-  private totalServedToday: number = 214;
+  private currentQueue: number = 0;
+  private peakToday: number = 0;
+  private averageToday: number = 0;
+  private totalServedToday: number = 0;
   private historyPoints: QueueDataPoint[] = [];
   private activityLogs: ActivityLog[] = [];
   private notifications: NotificationItem[] = [];
@@ -81,63 +81,11 @@ export class SimulationEngine {
   }
 
   private seedInitialHistory() {
-    const now = Date.now();
-    const baseCounts = [8, 9, 11, 13, 16, 19, 22, 26, 28, 25, 21, 18, 16, 17, 17];
-    const stepMs = 2 * 60 * 1000; // 2 minutes apart = last 30 minutes
-
-    for (let i = 0; i < baseCounts.length; i++) {
-      const ptTime = new Date(now - (baseCounts.length - 1 - i) * stepMs);
-      const hours = ptTime.getHours().toString().padStart(2, '0');
-      const mins = ptTime.getMinutes().toString().padStart(2, '0');
-      const count = baseCounts[i];
-      this.historyPoints.push({
-        time: `${hours}:${mins}`,
-        timestamp: ptTime.getTime(),
-        count,
-        status: this.calculateCrowdStatus(count)
-      });
-    }
+    this.historyPoints = [];
   }
 
   private seedInitialLogs() {
-    const now = Date.now();
-    this.activityLogs = [
-      {
-        id: 'act-1',
-        timestamp: new Date(now - 14 * 1000),
-        type: 'ENTRY',
-        message: 'Student joined LH2 Mess line — Queue count is 17',
-        delta: +1
-      },
-      {
-        id: 'act-2',
-        timestamp: new Date(now - 58 * 1000),
-        type: 'EXIT',
-        message: 'Diner collected food tray & cleared serving counter',
-        delta: -1
-      },
-      {
-        id: 'act-3',
-        timestamp: new Date(now - 124 * 1000),
-        type: 'HEARTBEAT',
-        message: 'Serving counters moving smoothly at normal pace',
-        delta: 0
-      },
-      {
-        id: 'act-4',
-        timestamp: new Date(now - 210 * 1000),
-        type: 'SYSTEM',
-        message: 'All 3 serving counters active in LH2 Mess',
-        delta: 0
-      },
-      {
-        id: 'act-5',
-        timestamp: new Date(now - 340 * 1000),
-        type: 'ENTRY',
-        message: 'Student joined LH2 Mess line — Queue count is 17',
-        delta: +1
-      }
-    ];
+    this.activityLogs = [];
   }
 
   private seedInitialNotifications() {

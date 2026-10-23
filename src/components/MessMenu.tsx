@@ -5,12 +5,9 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
-  Coffee,
-  Heart,
   Info,
   Scale,
-  Sparkles,
-  Utensils,
+  Star,
   UtensilsCrossed
 } from 'lucide-react';
 import {
@@ -19,15 +16,15 @@ import {
   MESS_HALL_NAME,
   MESS_INSTRUCTIONS
 } from '../data/mockMenu';
-import { FoodSegment, MealSchedule, MealType, MenuItem } from '../types/messq';
+import { FoodSegment, MealType, MenuItem } from '../types/messq';
 import { iotService } from '../services/iotService';
 
 export const MessMenu: React.FC = () => {
-  // Determine current meal by local hour matching exact student mess timings:
-  // Breakfast: 7:00 AM to 9:00 AM (7.0 - 9.0)
-  // Lunch: 12:30 PM to 2:00 PM (12.5 - 14.0)
-  // Snacks: 4:45 PM to 6:15 PM (16.75 - 18.25)
-  // Dinner: 7:15 PM to 9:00 PM (19.25 - 21.0)
+  // Official dining timings:
+  // Breakfast: 7:00 AM – 9:00 AM
+  // Lunch: 12:30 PM – 2:00 PM
+  // Snacks: 4:45 PM – 6:15 PM (identical for Veg, Non-Veg, and Special)
+  // Dinner: 7:15 PM – 9:00 PM
   const getActiveMealId = (): MealType => {
     const hour = new Date().getHours() + new Date().getMinutes() / 60;
     if (hour >= 7.0 && hour < 9.0) return 'BREAKFAST';
@@ -35,7 +32,6 @@ export const MessMenu: React.FC = () => {
     if (hour >= 16.75 && hour < 18.25) return 'SNACKS';
     if (hour >= 19.25 && hour < 21.0) return 'DINNER';
 
-    // Upcoming meal prediction for off-hours
     if (hour < 7.0) return 'BREAKFAST';
     if (hour < 12.5) return 'LUNCH';
     if (hour < 16.75) return 'SNACKS';
@@ -43,18 +39,18 @@ export const MessMenu: React.FC = () => {
     return 'BREAKFAST';
   };
 
-  const [selectedDay, setSelectedDay] = useState<string>('thursday'); // Thursday is today (Sep 17)
+  const [selectedDay, setSelectedDay] = useState<string>('thursday');
   const [selectedMealId, setSelectedMealId] = useState<MealType>(getActiveMealId());
   const [selectedSegment, setSelectedSegment] = useState<'ALL' | FoodSegment>('ALL');
   const [showGuidelines, setShowGuidelines] = useState(false);
 
-  // Student favorites saved in localStorage with student friendly defaults
+  // Student favorite dishes persisted in localStorage
   const [favoriteNames, setFavoriteNames] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('messq_favorite_dish_names');
       if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.warn('Could not read favorite dish names', e);
+    } catch {
+      // ignore
     }
     return [
       'Hot Aloo Samosa (Crispy)',
@@ -76,7 +72,6 @@ export const MessMenu: React.FC = () => {
       .map((item) => ({ item, meal }))
   );
 
-  // Sync favorites to localStorage & trigger student notifications when user favorites items
   const toggleFavorite = (itemName: string) => {
     let next: string[];
     const isFav = favoriteNames.includes(itemName);
@@ -85,13 +80,13 @@ export const MessMenu: React.FC = () => {
     } else {
       next = [...favoriteNames, itemName];
 
-      // Check if this newly favorited item is in today's menu (any of the 4 meals)
+      // Check if newly favorited item is in today's menu
       for (const meal of todaysSchedule.meals) {
         const found = meal.items.find((i) => i.name === itemName);
         if (found) {
           iotService.addNotification(
-            `⭐ Favorite in Today's ${meal.title}!`,
-            `"${itemName}" is being served today in ${meal.title} (${meal.timing}) at ${MESS_HALL_NAME}!`,
+            `Favorite Dish in Today's ${meal.title}`,
+            `"${itemName}" is scheduled for today's ${meal.title} (${meal.timing}) in ${MESS_HALL_NAME}.`,
             'SUCCESS'
           );
           break;
@@ -101,12 +96,11 @@ export const MessMenu: React.FC = () => {
     setFavoriteNames(next);
     try {
       localStorage.setItem('messq_favorite_dish_names', JSON.stringify(next));
-    } catch (e) {
-      console.warn('Could not save favorite dish names', e);
+    } catch {
+      // ignore
     }
   };
 
-  // On initial mount, push a notification for favorite dishes in today's menu if not already notified
   useEffect(() => {
     if (favoritesInToday.length > 0) {
       const topFav = favoritesInToday[0];
@@ -114,8 +108,8 @@ export const MessMenu: React.FC = () => {
       if (!hasNotified) {
         sessionStorage.setItem('messq_fav_notified_today', 'true');
         iotService.addNotification(
-          `🎉 Favorite on Today's Menu: ${topFav.item.name}!`,
-          `Your favorite dish "${topFav.item.name}" is scheduled for ${topFav.meal.title} (${topFav.meal.timing}) at ${MESS_HALL_NAME}!`,
+          `Favorite Dish on Today's Menu: ${topFav.item.name}`,
+          `Your favorited dish "${topFav.item.name}" is scheduled for ${topFav.meal.title} (${topFav.meal.timing}) in ${MESS_HALL_NAME}.`,
           'SUCCESS'
         );
       }
@@ -124,9 +118,9 @@ export const MessMenu: React.FC = () => {
 
   const isSnacks = activeMeal.id === 'SNACKS';
 
-  // Filter items by segment: Veg, Non-Veg, Special (Note: Snacks is same for all)
+  // Filter items by segment. Snacks is common to all.
   const filteredItems = activeMeal.items.filter((item) => {
-    if (isSnacks) return true; // Snacks is same for all!
+    if (isSnacks) return true;
     if (selectedSegment === 'ALL') return true;
     return item.segment === selectedSegment;
   });
@@ -138,27 +132,27 @@ export const MessMenu: React.FC = () => {
   return (
     <section
       id="mess-menu-section"
-      className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 mb-6 shadow-md transition-all"
+      className="bg-white border border-[#e5dac6] rounded-lg p-5 sm:p-6 mb-6 shadow-xs"
     >
       {/* Section Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-slate-800/80 gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-[#f0e7d7] gap-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-[11px] font-mono uppercase tracking-widest text-cyan-400 font-semibold flex items-center gap-1.5">
+            <span className="text-[11px] font-mono uppercase tracking-widest text-[#c53727] font-semibold flex items-center gap-1.5">
               <UtensilsCrossed className="w-3.5 h-3.5" />
               {MESS_HALL_NAME} Daily Menu
             </span>
-            <span className="text-slate-600 hidden sm:inline">•</span>
-            <span className="text-[11px] font-mono text-slate-400 hidden sm:inline">
-              Chief Warden: <strong className="text-slate-200">{CHIEF_WARDEN_NAME}</strong>
+            <span className="text-[#ded2be] hidden sm:inline">|</span>
+            <span className="text-[11px] font-mono text-[#6b7267] hidden sm:inline">
+              Chief Warden: <strong className="text-[#1e231d]">{CHIEF_WARDEN_NAME}</strong>
             </span>
           </div>
 
-          <h2 className="text-lg sm:text-2xl font-bold text-white font-mono">
-            Today's Dining Menu
+          <h2 className="font-heading text-lg sm:text-xl font-bold text-[#1e231d]">
+            Hostel Dining Schedule
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Veg, Non-Veg & Special meal schedule for September 2026
+          <p className="text-xs text-[#6b7267] mt-0.5">
+            Vegetarian, Non-Vegetarian &amp; Special meal plan (LH2 Mess)
           </p>
         </div>
 
@@ -166,44 +160,43 @@ export const MessMenu: React.FC = () => {
         <div className="flex items-center space-x-2 text-xs font-mono">
           <button
             onClick={() => setShowGuidelines(!showGuidelines)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-300 text-xs transition-colors"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md bg-[#faf7f0] border border-[#e5dac6] hover:bg-[#f5efe3] text-[#4d534b] text-xs transition-colors"
           >
-            <Scale className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Portion Rules</span>
+            <Scale className="w-3.5 h-3.5 text-[#236b3d]" />
+            <span>Portion Regulations</span>
             {showGuidelines ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
 
-      {/* Expandable Official Mess Service Guidelines */}
+      {/* Expandable Official Mess Guidelines */}
       {showGuidelines && (
-        <div className="mb-5 p-4 rounded-xl bg-slate-950 border border-cyan-500/30 text-xs font-mono animate-in fade-in duration-150">
-          <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
-            <span className="font-bold text-cyan-300 uppercase tracking-wide flex items-center gap-1.5">
-              <Info className="w-4 h-4 text-cyan-400" />
-              Official Mess Service Guidelines ({CHIEF_WARDEN_NAME})
+        <div className="mb-4 p-4 rounded-md bg-[#faf7f0] border border-[#e5dac6] text-xs font-mono">
+          <div className="flex items-center justify-between mb-2 pb-2 border-b border-[#ebdcc7]">
+            <span className="font-bold text-[#1e231d] uppercase tracking-wide flex items-center gap-1.5">
+              <Info className="w-4 h-4 text-[#c53727]" />
+              Official Service Regulations ({CHIEF_WARDEN_NAME})
             </span>
-            <span className="text-[10px] text-slate-500">{MESS_HALL_NAME}</span>
+            <span className="text-[10px] text-[#7a8077]">{MESS_HALL_NAME}</span>
           </div>
-          <ul className="space-y-1.5 text-slate-300">
+          <ul className="space-y-1.5 text-[#4d534b] text-[11px] leading-relaxed">
             {MESS_INSTRUCTIONS.map((rule, idx) => (
-              <li key={idx} className="text-[11px] leading-relaxed">
-                {rule}
+              <li key={idx} className="flex items-start space-x-2">
+                <span className="text-[#c53727] font-bold">&bull;</span>
+                <span>{rule}</span>
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {/* Favorite Dishes in Today's Menu Highlight Bar */}
+      {/* Starred Favorite Dish Notification Banner (if any favorited dish is served today) */}
       {favoritesInToday.length > 0 && (
-        <div className="mb-4 p-3 bg-gradient-to-r from-amber-950/40 via-slate-950 to-slate-950 border border-amber-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-          <div className="flex items-center gap-2">
-            <span className="flex h-5 w-5 rounded-full bg-amber-500/20 text-amber-300 items-center justify-center">
-              ⭐
-            </span>
-            <span className="text-slate-200">
-              <strong className="text-amber-300">{favoritesInToday.length} of your favorite dishes</strong> are served today in {MESS_HALL_NAME}!
+        <div className="mb-4 p-3 rounded-md bg-[#fffbf2] border border-[#ebd4b2] text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 text-[#855314]">
+            <Star className="w-4 h-4 text-[#c53727] fill-[#c53727] shrink-0" />
+            <span className="font-medium">
+              Starred Dishes on Today&apos;s Menu:
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -214,7 +207,7 @@ export const MessMenu: React.FC = () => {
                   setSelectedDay('thursday');
                   setSelectedMealId(meal.id);
                 }}
-                className="px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-[11px] text-amber-200 border border-amber-500/40 transition-colors"
+                className="px-2 py-0.5 rounded-md bg-white text-[11px] text-[#8c2210] border border-[#ebd4b2] hover:bg-[#fbf1ea] transition-colors"
               >
                 {item.name} ({meal.title})
               </button>
@@ -223,28 +216,28 @@ export const MessMenu: React.FC = () => {
         </div>
       )}
 
-      {/* Day Selector (Mobile Horizontal Scroll / Flex) */}
+      {/* Day Selector */}
       <div className="mb-4">
-        <div className="text-[11px] font-mono text-slate-400 mb-2 uppercase tracking-wider flex items-center justify-between">
-          <span>Select Day:</span>
-          <span className="text-cyan-400 font-semibold">{daySchedule.dayName} ({daySchedule.datesText})</span>
+        <div className="text-[11px] font-mono text-[#6b7267] mb-2 uppercase tracking-wider flex items-center justify-between">
+          <span>Day Schedule:</span>
+          <span className="text-[#c53727] font-semibold">{daySchedule.dayName} ({daySchedule.datesText})</span>
         </div>
-        <div className="flex overflow-x-auto pb-1.5 gap-1.5 no-scrollbar">
+        <div className="flex overflow-x-auto pb-1 gap-1.5 no-scrollbar">
           {Object.entries(FULL_WEEK_MENU).map(([key, day]) => {
             const isSelected = selectedDay === key;
             return (
               <button
                 key={key}
                 onClick={() => setSelectedDay(key)}
-                className={`px-3 py-2 rounded-xl text-xs font-mono font-medium whitespace-nowrap transition-all border ${
+                className={`px-3 py-1.5 rounded-md text-xs font-mono font-medium whitespace-nowrap transition-colors border ${
                   isSelected
-                    ? 'bg-cyan-950 text-cyan-300 border-cyan-500/60 shadow-sm'
-                    : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                    ? 'bg-[#c53727] text-white border-[#c53727] shadow-xs'
+                    : 'bg-[#faf7f0] text-[#4d534b] border-[#e5dac6] hover:bg-[#f5efe3]'
                 }`}
               >
                 {day.dayName}
                 {key === 'thursday' && (
-                  <span className="ml-1 text-[9px] px-1 py-0.2 rounded bg-cyan-500/20 text-cyan-300">
+                  <span className={`ml-1.5 text-[10px] px-1 py-0.2 rounded font-bold ${isSelected ? 'bg-[#a82a1b] text-white' : 'bg-[#e5dac6] text-[#4d534b]'}`}>
                     Today
                   </span>
                 )}
@@ -254,280 +247,160 @@ export const MessMenu: React.FC = () => {
         </div>
       </div>
 
-      {/* 4 Meal Timing Cards: Breakfast (7-9 AM), Lunch (12:30-2 PM), Snacks (4:45-6:15 PM), Dinner (7:15-9 PM) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-4">
+      {/* 4 Meal Timing Cards: Breakfast, Lunch, Snacks (4:45-6:15 PM), Dinner */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-4">
         {daySchedule.meals.map((meal) => {
           const isSelected = selectedMealId === meal.id;
-          const isNowServing = currentlyServingMealId === meal.id;
+          const isCurrentActive = currentlyServingMealId === meal.id && selectedDay === 'thursday';
 
           return (
             <button
               key={meal.id}
-              id={`meal-tab-${meal.id.toLowerCase()}`}
               onClick={() => setSelectedMealId(meal.id)}
-              className={`p-3 rounded-xl border text-left transition-all relative ${
+              className={`p-3 rounded-md text-left transition-all border ${
                 isSelected
-                  ? 'bg-slate-950 border-cyan-500/60 shadow-sm'
-                  : 'bg-slate-950/40 border-slate-800 hover:bg-slate-950 hover:border-slate-700'
+                  ? 'bg-[#faf7f0] border-[#c53727] ring-1 ring-[#c53727]/30'
+                  : 'bg-white border-[#e5dac6] hover:bg-[#faf7f0]'
               }`}
             >
               <div className="flex items-center justify-between mb-1">
-                <span
-                  className={`text-xs font-mono font-bold uppercase tracking-wider ${
-                    isSelected ? 'text-cyan-300' : 'text-slate-300'
-                  }`}
-                >
+                <span className="text-xs font-bold font-mono text-[#1e231d]">
                   {meal.title}
                 </span>
-
-                {isNowServing && (
-                  <span className="px-1.5 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-700 rounded text-[9px] font-mono font-bold animate-pulse">
-                    NOW
+                {isCurrentActive && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md font-bold bg-[#ebf5ee] text-[#1b5e35]">
+                    Active
                   </span>
                 )}
               </div>
-
-              <div className="flex items-center text-[11px] text-slate-400 font-mono">
-                <Clock className="w-3 h-3 mr-1 text-slate-500 shrink-0" />
-                <span className="truncate">{meal.timing}</span>
+              <div className="text-[11px] font-mono text-[#7a8077] flex items-center gap-1">
+                <Clock className="w-3 h-3 text-[#8b9187]" />
+                <span>{meal.timing}</span>
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* Snacks Notice OR 3 SEGMENTS SELECTOR (Veg, Non-Veg, Special) */}
+      {/* Segment Filter (Veg, Non-Veg, Special): Hidden during Snacks as Snacks is Common */}
       {isSnacks ? (
-        <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3.5 mb-4 text-xs font-mono flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Coffee className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-emerald-200">
-              <strong>Evening Snacks (4:45 PM – 6:15 PM):</strong> Same common snack menu for all students across Veg, Non-Veg & Special dining.
-            </span>
-          </div>
-          <span className="text-[10px] text-emerald-400 bg-emerald-950 border border-emerald-700/50 px-2 py-0.5 rounded shrink-0">
-            Universal Snack
+        <div className="mb-4 p-2.5 rounded-md bg-[#ebf5ee] border border-[#b7dfc4] text-xs font-mono text-[#1b5e35] flex items-center justify-between">
+          <span>
+            <strong>Evening Snacks Note:</strong> 4:45 PM to 6:15 PM service is identical for all Veg, Non-Veg &amp; Special dining.
           </span>
+          <span className="text-[11px] font-bold text-[#1b5e35]">Common Menu</span>
         </div>
       ) : (
-        <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 sm:p-4 mb-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-            <span className="text-xs font-mono uppercase text-slate-400 font-semibold">
-              Filter by Segment:
-            </span>
-            <div className="text-[11px] font-mono text-slate-400">
-              Viewing: <strong className="text-white">{activeMeal.title}</strong> ({activeMeal.timing})
-            </div>
-          </div>
-
-          {/* 3 Segment Action Pills */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {/* 1. All Items */}
-            <button
-              onClick={() => setSelectedSegment('ALL')}
-              className={`py-2 px-3 rounded-lg border text-xs font-mono font-medium flex items-center justify-between transition-all ${
-                selectedSegment === 'ALL'
-                  ? 'bg-slate-800 text-white border-slate-600 shadow-sm'
-                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <span>All Items</span>
-              <span className="px-1.5 py-0.2 rounded bg-slate-950 text-[10px] text-slate-400">
-                {activeMeal.items.length}
-              </span>
-            </button>
-
-            {/* 2. Veg Segment */}
-            <button
-              onClick={() => setSelectedSegment('VEG')}
-              className={`py-2 px-3 rounded-lg border text-xs font-mono font-medium flex items-center justify-between transition-all ${
-                selectedSegment === 'VEG'
-                  ? 'bg-emerald-950 text-emerald-300 border-emerald-500/70 shadow-sm'
-                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-emerald-300'
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                Veg
-              </span>
-              <span className="px-1.5 py-0.2 rounded bg-slate-950 text-[10px] text-emerald-400">
-                {vegCount}
-              </span>
-            </button>
-
-            {/* 3. Non-Veg Segment */}
+        <div className="flex items-center gap-1.5 mb-4 text-xs font-mono">
+          <span className="text-[#7a8077] mr-1">Filter:</span>
+          <button
+            onClick={() => setSelectedSegment('ALL')}
+            className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
+              selectedSegment === 'ALL'
+                ? 'bg-[#1e231d] text-white font-semibold'
+                : 'bg-[#faf7f0] border border-[#e5dac6] text-[#4d534b] hover:bg-[#f5efe3]'
+            }`}
+          >
+            All Items ({activeMeal.items.length})
+          </button>
+          <button
+            onClick={() => setSelectedSegment('VEG')}
+            className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
+              selectedSegment === 'VEG'
+                ? 'bg-[#236b3d] text-white font-semibold'
+                : 'bg-[#ebf5ee] text-[#1b5e35] hover:bg-[#def0e3] border border-[#b7dfc4]'
+            }`}
+          >
+            Vegetarian ({vegCount})
+          </button>
+          {nonVegCount > 0 && (
             <button
               onClick={() => setSelectedSegment('NON_VEG')}
-              className={`py-2 px-3 rounded-lg border text-xs font-mono font-medium flex items-center justify-between transition-all ${
+              className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
                 selectedSegment === 'NON_VEG'
-                  ? 'bg-rose-950 text-rose-300 border-rose-500/70 shadow-sm'
-                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-rose-300'
+                  ? 'bg-[#855314] text-white font-semibold'
+                  : 'bg-[#fcf5e8] text-[#855314] hover:bg-[#f7ebd3] border border-[#ebd4b2]'
               }`}
             >
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-rose-500" />
-                Non-Veg
-              </span>
-              <span className="px-1.5 py-0.2 rounded bg-slate-950 text-[10px] text-rose-400">
-                {nonVegCount}
-              </span>
+              Non-Veg ({nonVegCount})
             </button>
-
-            {/* 4. Special Segment */}
+          )}
+          {specialCount > 0 && (
             <button
               onClick={() => setSelectedSegment('SPECIAL')}
-              className={`py-2 px-3 rounded-lg border text-xs font-mono font-medium flex items-center justify-between transition-all ${
+              className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
                 selectedSegment === 'SPECIAL'
-                  ? 'bg-amber-950 text-amber-300 border-amber-500/70 shadow-sm'
-                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-amber-300'
+                  ? 'bg-[#c53727] text-white font-semibold'
+                  : 'bg-[#fdf2f0] text-[#a82a1b] hover:bg-[#fae2de] border border-[#f5c7c1]'
               }`}
             >
-              <span className="flex items-center gap-1.5">
-                <Sparkles className="w-3 h-3 text-amber-400" />
-                Special
-              </span>
-              <span className="px-1.5 py-0.2 rounded bg-slate-950 text-[10px] text-amber-400">
-                {specialCount}
-              </span>
+              Special ({specialCount})
             </button>
-          </div>
+          )}
         </div>
       )}
 
-      {/* Menu Items Grid */}
-      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 sm:p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-4 border-b border-slate-800/60 gap-2">
-          <div className="flex items-center space-x-2">
-            <h3 className="text-sm sm:text-base font-bold font-mono text-white">
-              {activeMeal.title} Menu Items
-            </h3>
-            <span className="text-xs text-slate-400 font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-              {activeMeal.timing}
-            </span>
-          </div>
-
-          <span className="text-xs text-slate-400 font-mono">
-            {filteredItems.length} items listed
-            {!isSnacks && selectedSegment !== 'ALL' && ` in ${selectedSegment.replace('_', ' ')}`}
-          </span>
-        </div>
-
-        {filteredItems.length === 0 ? (
-          <div className="py-8 text-center text-slate-500 font-mono text-xs">
-            No items in this segment for {activeMeal.title}. Try switching to "All Items" or choose another meal.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredItems.map((item) => {
-              const isFav = favoriteNames.includes(item.name);
-
-              return (
-                <div
-                  key={item.id}
-                  className={`bg-slate-900/80 border rounded-xl p-3.5 flex items-start justify-between transition-colors shadow-sm ${
-                    isFav ? 'border-amber-500/50 bg-slate-900/95' : 'border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="space-y-1.5 pr-2 flex-1">
-                    <div className="flex items-center space-x-2">
-                      {/* Dietary Symbol: Green for Veg, Red for Non-Veg */}
-                      {item.isVeg ? (
-                        <span
-                          className="w-3.5 h-3.5 border border-emerald-500 rounded-sm flex items-center justify-center p-0.5 shrink-0"
-                          title="100% Vegetarian"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        </span>
-                      ) : (
-                        <span
-                          className="w-3.5 h-3.5 border border-rose-500 rounded-sm flex items-center justify-center p-0.5 shrink-0"
-                          title="Non-Vegetarian"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                        </span>
-                      )}
-
-                      <h4 className="text-xs sm:text-sm font-semibold text-slate-200 flex items-center gap-1.5">
-                        <span>{item.name}</span>
-                        {isFav && <span className="text-amber-400 text-xs">★</span>}
-                      </h4>
-                    </div>
-
-                    {/* Segment Badge + Category */}
-                    <div className="flex flex-wrap items-center gap-1.5 pl-5 text-[11px] font-mono">
-                      {isSnacks ? (
-                        <span className="px-1.5 py-0.2 rounded bg-emerald-950/60 border border-emerald-800/40 text-emerald-400 text-[10px]">
-                          Common Snack
-                        </span>
-                      ) : (
-                        <>
-                          {item.segment === 'VEG' && (
-                            <span className="px-1.5 py-0.2 rounded bg-emerald-950/60 border border-emerald-800/40 text-emerald-400 text-[10px]">
-                              Veg
-                            </span>
-                          )}
-                          {item.segment === 'NON_VEG' && (
-                            <span className="px-1.5 py-0.2 rounded bg-rose-950/60 border border-rose-800/40 text-rose-400 text-[10px]">
-                              Non-Veg
-                            </span>
-                          )}
-                          {item.segment === 'SPECIAL' && (
-                            <span className="px-1.5 py-0.2 rounded bg-amber-950/60 border border-amber-800/40 text-amber-300 text-[10px] flex items-center gap-1">
-                              <Sparkles className="w-2.5 h-2.5" />
-                              Special
-                            </span>
-                          )}
-                        </>
-                      )}
-
-                      <span className="text-slate-400 capitalize">• {item.category}</span>
-
-                      {item.calories && (
-                        <span className="text-slate-400">• ~{item.calories} kcal</span>
-                      )}
-                    </div>
-
-                    {/* Portion Note (weighing machine compliance: Chicken 150g/180g, Paneer 75g) */}
-                    {item.portionNote && (
-                      <div className="pl-5 pt-0.5">
-                        <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/50 border border-cyan-800/40 px-1.5 py-0.5 rounded inline-flex items-center gap-1">
-                          <Scale className="w-2.5 h-2.5 text-cyan-400" />
-                          Portion: {item.portionNote}
-                        </span>
-                      </div>
-                    )}
+      {/* Menu Item Cards Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {filteredItems.map((item) => {
+          const isStarred = favoriteNames.includes(item.name);
+          return (
+            <div
+              key={item.id}
+              className={`p-3.5 rounded-md border transition-all text-xs flex flex-col justify-between ${
+                isStarred
+                  ? 'bg-[#fffbf2] border-[#ebd4b2]'
+                  : 'bg-white border-[#e5dac6] hover:bg-[#faf7f0]'
+              }`}
+            >
+              <div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center space-x-1.5">
+                    {/* Veg/Non-Veg Indicator */}
+                    <span
+                      className={`inline-block w-2.5 h-2.5 rounded-xs border ${
+                        item.isVeg
+                          ? 'border-[#236b3d] bg-[#236b3d]'
+                          : 'border-[#855314] bg-[#855314]'
+                      }`}
+                    />
+                    <span className="font-semibold text-[#1e231d] leading-tight">
+                      {item.name}
+                    </span>
                   </div>
 
-                  {/* Favorite Toggle Button */}
+                  {/* Favorite / Star Button */}
                   <button
                     onClick={() => toggleFavorite(item.name)}
-                    title={isFav ? 'Favorited dish (Tap to unfavorite)' : 'Tap heart to get alert when served'}
-                    className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
-                      isFav
-                        ? 'bg-amber-950/60 border-amber-500/60 text-amber-400 shadow-sm'
-                        : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
-                    }`}
+                    title={isStarred ? 'Remove from favorites' : 'Mark as favorite dish'}
+                    className="p-1 text-[#8b9187] hover:text-[#c53727] transition-colors"
                   >
-                    <Heart className={`w-3.5 h-3.5 ${isFav ? 'fill-amber-400 text-amber-400' : ''}`} />
+                    <Star
+                      className={`w-4 h-4 ${
+                        isStarred ? 'text-[#c53727] fill-[#c53727]' : ''
+                      }`}
+                    />
                   </button>
                 </div>
-              );
-            })}
-          </div>
-        )}
 
-        {/* Footer info strip */}
-        <div className="mt-5 pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-400 gap-2 font-mono">
-          <div className="flex items-center space-x-2">
-            <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span>
-              Tap the heart on any dish to receive a notification alert whenever it is in today's menu.
-            </span>
-          </div>
-          <span className="text-[11px] text-slate-300 shrink-0 font-semibold">
-            Chief Warden: {CHIEF_WARDEN_NAME}
-          </span>
-        </div>
+                {item.portionNote && (
+                  <p className="text-[11px] font-mono text-[#7a8077] mt-1">
+                    Portion: {item.portionNote}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-[#f0e7d7] font-mono text-[11px] text-[#7a8077]">
+                <span className="uppercase text-[10px] tracking-wider text-[#4d534b]">
+                  {item.category}
+                </span>
+                {item.calories && (
+                  <span>~{item.calories} kcal</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

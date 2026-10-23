@@ -1,6 +1,6 @@
 {
   "name": "MessQ",
-  "description": "Real-time LH2 Mess crowd status and daily dining menu for students.",
+  "description": "Real-time LH2 Mess queue monitoring and daily hostel dining menu.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

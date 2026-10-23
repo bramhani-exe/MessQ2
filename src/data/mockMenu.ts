@@ -1,6 +1,6 @@
 import { DayMenuSchedule, MealSchedule, MealType, MenuItem } from '../types/messq';
 
-export const CHIEF_WARDEN_NAME = 'Dr. GDV Santhosh';
+export const CHIEF_WARDEN_NAME = 'Dr. Malavika Ganta';
 export const MESS_HALL_NAME = 'LH2 Mess';
 
 export const MESS_INSTRUCTIONS = [
@@ -11,7 +11,7 @@ export const MESS_INSTRUCTIONS = [
   '5. Chicken should weigh 150 g (and 180 g on Sundays) after cooking, i.e., before serving (excluding bowl weight and gravy).',
   '6. Paneer should be soft and must weigh 75 g after cooking, i.e., before serving (excluding bowl weight and gravy).',
   '7. Roti/Phulka/Chapathi should be prepared using 100% good-quality Atta.',
-  '8. White Rice (Sona Masuri) must be cooked properly every day — neither undercooked nor overcooked.',
+  '8. White Rice (Sona Masuri) must be cooked properly every day (neither undercooked nor overcooked).',
   '9. Evening snacks (4:45 PM to 6:15 PM) are served identically to all residents across Veg, Non-Veg & Special dining.'
 ];
 

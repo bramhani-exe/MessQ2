@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import {
-  ArrowDown,
-  ArrowUp,
-  BarChart3,
   Calendar,
+  CheckCircle2,
   Clock,
-  Flame,
   Info,
-  LineChart,
-  TrendingUp
+  LineChart as LineChartIcon,
+  Sparkles,
+  TrendingUp,
+  Users
 } from 'lucide-react';
 import { QueueDataPoint, QueueState, QueueThresholdConfig } from '../types/messq';
 
@@ -18,196 +17,233 @@ interface QueueAnalyticsProps {
   thresholds: QueueThresholdConfig;
 }
 
+// Typical Peak Hours Dining Curve for LH2 Mess across operational hours
+interface HourlyRushPoint {
+  hour: string;
+  timeLabel: string;
+  count: number;
+  meal: string;
+  isPeak: boolean;
+  status: 'LOW' | 'MODERATE' | 'HIGH';
+}
+
+const TYPICAL_HOURLY_RUSH: HourlyRushPoint[] = [
+  { hour: '07:00', timeLabel: '7:00 AM', count: 6, meal: 'Breakfast Opens', isPeak: false, status: 'LOW' },
+  { hour: '07:30', timeLabel: '7:30 AM', count: 14, meal: 'Breakfast', isPeak: false, status: 'LOW' },
+  { hour: '08:00', timeLabel: '8:00 AM', count: 26, meal: 'Breakfast Peak', isPeak: true, status: 'HIGH' },
+  { hour: '08:30', timeLabel: '8:30 AM', count: 22, meal: 'Breakfast Rush', isPeak: false, status: 'MODERATE' },
+  { hour: '09:00', timeLabel: '9:00 AM', count: 5, meal: 'Breakfast Ends', isPeak: false, status: 'LOW' },
+  { hour: '10:30', timeLabel: '10:30 AM', count: 0, meal: 'Closed (Prep)', isPeak: false, status: 'LOW' },
+  { hour: '12:30', timeLabel: '12:30 PM', count: 16, meal: 'Lunch Opens', isPeak: false, status: 'MODERATE' },
+  { hour: '01:00', timeLabel: '1:00 PM', count: 36, meal: 'Lunch Peak', isPeak: true, status: 'HIGH' },
+  { hour: '01:30', timeLabel: '1:30 PM', count: 30, meal: 'Lunch Rush', isPeak: true, status: 'HIGH' },
+  { hour: '02:00', timeLabel: '2:00 PM', count: 8, meal: 'Lunch Ends', isPeak: false, status: 'LOW' },
+  { hour: '03:30', timeLabel: '3:30 PM', count: 0, meal: 'Closed (Prep)', isPeak: false, status: 'LOW' },
+  { hour: '04:45', timeLabel: '4:45 PM', count: 12, meal: 'Snacks Open', isPeak: false, status: 'LOW' },
+  { hour: '05:15', timeLabel: '5:15 PM', count: 22, meal: 'Snacks Peak', isPeak: true, status: 'MODERATE' },
+  { hour: '05:45', timeLabel: '5:45 PM', count: 15, meal: 'Evening Snacks', isPeak: false, status: 'MODERATE' },
+  { hour: '06:15', timeLabel: '6:15 PM', count: 4, meal: 'Snacks End', isPeak: false, status: 'LOW' },
+  { hour: '07:15', timeLabel: '7:15 PM', count: 18, meal: 'Dinner Opens', isPeak: false, status: 'MODERATE' },
+  { hour: '08:00', timeLabel: '8:00 PM', count: 34, meal: 'Dinner Peak', isPeak: true, status: 'HIGH' },
+  { hour: '08:30', timeLabel: '8:30 PM', count: 24, meal: 'Dinner Rush', isPeak: false, status: 'MODERATE' },
+  { hour: '09:00', timeLabel: '9:00 PM', count: 6, meal: 'Dinner Ends', isPeak: false, status: 'LOW' }
+];
+
 export const QueueAnalytics: React.FC<QueueAnalyticsProps> = ({
   queue,
   history,
   thresholds
 }) => {
-  const [hoveredPoint, setHoveredPoint] = useState<QueueDataPoint | null>(null);
-  const [hoverX, setHoverX] = useState<number | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    label: string;
+    count: number;
+    meal: string;
+    isPeak?: boolean;
+    type: 'typical' | 'live';
+  } | null>(null);
 
-  // Compute stats
+  const [viewMode, setViewMode] = useState<'typical' | 'live' | 'comparison'>('typical');
+
   const currentCount = queue.queueCount;
-  const peakCount = Math.max(...history.map((h) => h.count), queue.peakToday);
-  const lowestCount = Math.min(...history.map((h) => h.count), 4);
+  const peakCount = history.length > 0 ? Math.max(...history.map((h) => h.count), currentCount) : currentCount;
   const averageCount =
     history.length > 0
       ? Math.round(history.reduce((acc, cur) => acc + cur.count, 0) / history.length)
-      : queue.averageToday;
+      : currentCount;
 
   // Chart Dimensions
-  const width = 800;
+  const width = 840;
   const height = 240;
   const paddingLeft = 40;
-  const paddingRight = 20;
-  const paddingTop = 20;
+  const paddingRight = 24;
+  const paddingTop = 24;
   const paddingBottom = 40;
 
   const chartWidth = width - paddingLeft - paddingRight;
   const chartHeight = height - paddingTop - paddingBottom;
-  const maxVal = Math.max(35, peakCount + 5);
+  const maxVal = 40;
 
-  // Generate SVG Points
-  const points = history.map((pt, i) => {
-    const x = paddingLeft + (i / Math.max(1, history.length - 1)) * chartWidth;
+  // Typical Curve Points
+  const typicalPoints = TYPICAL_HOURLY_RUSH.map((pt, i) => {
+    const x = paddingLeft + (i / (TYPICAL_HOURLY_RUSH.length - 1)) * chartWidth;
     const y = paddingTop + chartHeight - (pt.count / maxVal) * chartHeight;
     return { x, y, pt };
   });
 
-  const pathD =
-    points.length > 0
-      ? points.reduce((acc, curr, i, arr) => {
+  const typicalPathD = typicalPoints.reduce((acc, curr, i, arr) => {
+    if (i === 0) return `M ${curr.x} ${curr.y}`;
+    const prev = arr[i - 1];
+    const cx = (prev.x + curr.x) / 2;
+    return `${acc} C ${cx} ${prev.y}, ${cx} ${curr.y}, ${curr.x} ${curr.y}`;
+  }, '');
+
+  // Live History Points (if available)
+  const liveDataPoints = history.length > 0 ? history : [
+    { timestamp: Date.now(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), count: currentCount, status: queue.crowdStatus }
+  ];
+
+  const livePoints = liveDataPoints.map((pt, i) => {
+    const x = paddingLeft + (i / Math.max(1, liveDataPoints.length - 1)) * chartWidth;
+    const y = paddingTop + chartHeight - (pt.count / maxVal) * chartHeight;
+    return { x, y, pt };
+  });
+
+  const livePathD =
+    livePoints.length > 1
+      ? livePoints.reduce((acc, curr, i, arr) => {
           if (i === 0) return `M ${curr.x} ${curr.y}`;
-          // Smooth bezier curve
           const prev = arr[i - 1];
           const cx = (prev.x + curr.x) / 2;
           return `${acc} C ${cx} ${prev.y}, ${cx} ${curr.y}, ${curr.x} ${curr.y}`;
         }, '')
       : '';
 
-  const areaD =
-    points.length > 0
-      ? `${pathD} L ${points[points.length - 1].x} ${paddingTop + chartHeight} L ${points[0].x} ${paddingTop + chartHeight} Z`
-      : '';
-
-  // Dynamic Insight generation
-  let insightText = '';
-  if (queue.crowdStatus === 'HIGH') {
-    insightText =
-      'Peak dining rush detected. Influx rate exceeds counter discharge pace. Expect longer turnaround until rush clears.';
-  } else if (queue.crowdStatus === 'MODERATE') {
-    insightText =
-      'Queue density is currently within the expected meal-hour baseline. All service counters are maintaining steady flow.';
-  } else {
-    insightText =
-      'Optimal dining window active. Minimal queue resistance with prompt counter availability and seat vacancy.';
-  }
-
   return (
     <section
       id="queue-analytics-section"
-      className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-7 mb-6 shadow-md"
+      className="bg-white border border-[#e5dac6] rounded-lg p-5 sm:p-6 mb-6 shadow-xs"
     >
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-6 border-b border-slate-800/80 gap-3">
+      {/* Header with Mode Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-4 border-b border-[#f0e7d7] gap-3">
         <div>
-          <span className="text-[11px] font-mono uppercase tracking-widest text-cyan-400 font-semibold flex items-center gap-1.5">
-            <LineChart className="w-3.5 h-3.5" />
-            Temporal Crowd Trends
+          <span className="text-[11px] font-mono uppercase tracking-widest text-[#c53727] font-semibold flex items-center gap-1.5">
+            <LineChartIcon className="w-3.5 h-3.5" />
+            Peak Hours &amp; Queue Trends
           </span>
-          <h2 className="text-lg sm:text-xl font-bold text-white font-mono">
-            Queue Size Over Time (Past 30 Minutes)
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Approximate student crowd trends over the past 30 minutes in LH2 Mess
+          <h3 className="font-heading text-lg sm:text-xl font-bold text-[#1e231d]">
+            Daily Mess Traffic &amp; Peak Hours Curve
+          </h3>
+          <p className="text-xs text-[#6b7267] mt-0.5">
+            Hourly dining rush pattern and counter turnaround flow for LH2 Mess
           </p>
         </div>
 
-        {/* Rolling Window Badge */}
-        <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
-          <span className="px-2.5 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300">
-            Window: 30 Mins (2m Bins)
-          </span>
+        {/* View Toggle */}
+        <div className="flex items-center space-x-1.5 p-1 bg-[#faf7f0] rounded-md border border-[#e5dac6] text-xs font-mono">
+          <button
+            onClick={() => setViewMode('typical')}
+            className={`px-2.5 py-1 rounded text-xs transition-colors ${
+              viewMode === 'typical'
+                ? 'bg-[#c53727] text-white font-semibold'
+                : 'text-[#4d534b] hover:text-[#1e231d]'
+            }`}
+          >
+            Typical Day Rush
+          </button>
+          <button
+            onClick={() => setViewMode('comparison')}
+            className={`px-2.5 py-1 rounded text-xs transition-colors ${
+              viewMode === 'comparison'
+                ? 'bg-[#c53727] text-white font-semibold'
+                : 'text-[#4d534b] hover:text-[#1e231d]'
+            }`}
+          >
+            Overlay Live
+          </button>
         </div>
       </div>
 
       {/* KPI Stats Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-          <span className="text-[11px] font-mono uppercase text-slate-500 block">Current</span>
-          <div className="flex items-baseline space-x-2 mt-1">
-            <span className="text-2xl font-bold font-mono text-white">{currentCount}</span>
-            <span className="text-xs text-slate-400">diners</span>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div className="bg-[#faf7f0] p-3.5 rounded-md border border-[#e5dac6]">
+          <span className="text-[10px] font-mono uppercase text-[#7a8077] block">Current Live Queue</span>
+          <div className="flex items-baseline space-x-1.5 mt-1">
+            <span className="text-2xl font-bold font-mono text-[#1e231d] tabular-nums">{currentCount}</span>
+            <span className="text-xs text-[#6b7267]">students</span>
           </div>
         </div>
 
-        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-          <span className="text-[11px] font-mono uppercase text-slate-500 block">30-Min Average</span>
-          <div className="flex items-baseline space-x-2 mt-1">
-            <span className="text-2xl font-bold font-mono text-cyan-400">{averageCount}</span>
-            <span className="text-xs text-slate-400">diners</span>
+        <div className="bg-[#faf7f0] p-3.5 rounded-md border border-[#e5dac6]">
+          <span className="text-[10px] font-mono uppercase text-[#7a8077] block">Busiest Meal Peak</span>
+          <div className="flex items-baseline space-x-1.5 mt-1">
+            <span className="text-2xl font-bold font-mono text-[#c53727] tabular-nums">1:00 PM</span>
+            <span className="text-xs text-[#6b7267]">~36 diners</span>
           </div>
         </div>
 
-        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-          <span className="text-[11px] font-mono uppercase text-slate-500 block">Peak Recorded</span>
-          <div className="flex items-baseline space-x-2 mt-1">
-            <span className="text-2xl font-bold font-mono text-amber-400">{peakCount}</span>
-            <span className="text-xs text-slate-400">diners</span>
+        <div className="bg-[#faf7f0] p-3.5 rounded-md border border-[#e5dac6]">
+          <span className="text-[10px] font-mono uppercase text-[#7a8077] block">Fastest Service Window</span>
+          <div className="flex items-baseline space-x-1.5 mt-1">
+            <span className="text-2xl font-bold font-mono text-[#236b3d] tabular-nums">7:15 AM</span>
+            <span className="text-xs text-[#6b7267]">&lt; 2 min wait</span>
           </div>
         </div>
 
-        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-          <span className="text-[11px] font-mono uppercase text-slate-500 block">Today's Total Served</span>
-          <div className="flex items-baseline space-x-2 mt-1">
-            <span className="text-2xl font-bold font-mono text-emerald-400">{queue.totalServedToday}</span>
-            <span className="text-xs text-slate-400">meals</span>
+        <div className="bg-[#faf7f0] p-3.5 rounded-md border border-[#e5dac6]">
+          <span className="text-[10px] font-mono uppercase text-[#7a8077] block">Total Exited Today</span>
+          <div className="flex items-baseline space-x-1.5 mt-1">
+            <span className="text-2xl font-bold font-mono text-[#236b3d] tabular-nums">{queue.totalServedToday}</span>
+            <span className="text-xs text-[#6b7267]">students</span>
           </div>
         </div>
       </div>
 
-      {/* SVG Chart Container */}
-      <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3 sm:p-5 relative">
-        <div className="w-full overflow-hidden">
+      {/* SVG Line Graph */}
+      <div className="bg-[#faf7f0] border border-[#e5dac6] rounded-md p-4 relative overflow-hidden">
+        <div className="flex items-center justify-between mb-2 text-xs font-mono text-[#6b7267]">
+          <div className="flex items-center space-x-3">
+            <span className="flex items-center space-x-1.5">
+              <span className="w-3 h-0.5 bg-[#c53727] inline-block" />
+              <span>Typical Daily Curve</span>
+            </span>
+            {viewMode === 'comparison' && (
+              <span className="flex items-center space-x-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#236b3d] inline-block" />
+                <span>Live Telemetry Points</span>
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] text-[#7a8077]">Hover points for crowd details</span>
+        </div>
+
+        <div className="w-full overflow-x-auto">
           <svg
             viewBox={`0 0 ${width} ${height}`}
-            className="w-full h-auto overflow-visible select-none"
+            className="w-full min-w-[680px] h-auto overflow-visible select-none"
           >
-            <defs>
-              <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
-              </linearGradient>
-            </defs>
-
-            {/* Threshold reference lines */}
-            {/* High threshold line */}
+            {/* High Rush Threshold Line */}
             <line
               x1={paddingLeft}
               y1={paddingTop + chartHeight - (thresholds.moderateMax / maxVal) * chartHeight}
               x2={width - paddingRight}
               y2={paddingTop + chartHeight - (thresholds.moderateMax / maxVal) * chartHeight}
-              stroke="#ef4444"
+              stroke="#f5c7c1"
               strokeDasharray="4 4"
-              strokeOpacity="0.35"
               strokeWidth="1"
             />
             <text
               x={width - paddingRight - 4}
               y={paddingTop + chartHeight - (thresholds.moderateMax / maxVal) * chartHeight - 4}
-              fill="#f87171"
+              fill="#a82a1b"
               fontSize="9"
               textAnchor="end"
               fontFamily="JetBrains Mono"
             >
-              High Threshold ({thresholds.moderateMax}+)
+              Peak Rush Level ({thresholds.moderateMax} students)
             </text>
 
-            {/* Moderate threshold line */}
-            <line
-              x1={paddingLeft}
-              y1={paddingTop + chartHeight - (thresholds.lowMax / maxVal) * chartHeight}
-              x2={width - paddingRight}
-              y2={paddingTop + chartHeight - (thresholds.lowMax / maxVal) * chartHeight}
-              stroke="#f59e0b"
-              strokeDasharray="4 4"
-              strokeOpacity="0.35"
-              strokeWidth="1"
-            />
-            <text
-              x={width - paddingRight - 4}
-              y={paddingTop + chartHeight - (thresholds.lowMax / maxVal) * chartHeight - 4}
-              fill="#fbbf24"
-              fontSize="9"
-              textAnchor="end"
-              fontFamily="JetBrains Mono"
-            >
-              Moderate Threshold ({thresholds.lowMax})
-            </text>
-
-            {/* Subtle Horizontal grid lines */}
-            {[0, 10, 20, 30].map((val) => {
-              if (val > maxVal) return null;
+            {/* Horizontal Grid lines */}
+            {[0, 10, 20, 30, 40].map((val) => {
               const y = paddingTop + chartHeight - (val / maxVal) * chartHeight;
               return (
                 <g key={val}>
@@ -216,14 +252,13 @@ export const QueueAnalytics: React.FC<QueueAnalyticsProps> = ({
                     y1={y}
                     x2={width - paddingRight}
                     y2={y}
-                    stroke="#334155"
-                    strokeWidth="0.75"
-                    strokeOpacity="0.4"
+                    stroke="#ebdcc7"
+                    strokeWidth="1"
                   />
                   <text
                     x={paddingLeft - 8}
                     y={y + 3}
-                    fill="#64748b"
+                    fill="#7a8077"
                     fontSize="10"
                     textAnchor="end"
                     fontFamily="JetBrains Mono"
@@ -234,128 +269,190 @@ export const QueueAnalytics: React.FC<QueueAnalyticsProps> = ({
               );
             })}
 
-            {/* Filled Area */}
-            {areaD && <path d={areaD} fill="url(#chartGradient)" />}
+            {/* Meal Time Band Indicators */}
+            <g opacity="0.6">
+              {/* Breakfast Band */}
+              <text x={paddingLeft + chartWidth * 0.12} y={paddingTop - 6} fill="#236b3d" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono" textAnchor="middle">
+                BREAKFAST (7-9 AM)
+              </text>
+              {/* Lunch Band */}
+              <text x={paddingLeft + chartWidth * 0.44} y={paddingTop - 6} fill="#c53727" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono" textAnchor="middle">
+                LUNCH (12:30-2 PM)
+              </text>
+              {/* Snacks Band */}
+              <text x={paddingLeft + chartWidth * 0.68} y={paddingTop - 6} fill="#855314" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono" textAnchor="middle">
+                SNACKS (4:45-6:15 PM)
+              </text>
+              {/* Dinner Band */}
+              <text x={paddingLeft + chartWidth * 0.88} y={paddingTop - 6} fill="#1e231d" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono" textAnchor="middle">
+                DINNER (7:15-9 PM)
+              </text>
+            </g>
 
-            {/* Main Data Line */}
-            {pathD && (
+            {/* Gradient Fill under Typical Curve */}
+            <defs>
+              <linearGradient id="rushCurveGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#c53727" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="#faf7f0" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            {typicalPathD && (
               <path
-                d={pathD}
+                d={`${typicalPathD} L ${typicalPoints[typicalPoints.length - 1].x} ${paddingTop + chartHeight} L ${typicalPoints[0].x} ${paddingTop + chartHeight} Z`}
+                fill="url(#rushCurveGradient)"
+              />
+            )}
+
+            {/* Main Peak Hours Line Curve */}
+            {typicalPathD && (
+              <path
+                d={typicalPathD}
                 fill="none"
-                stroke="#22d3ee"
+                stroke="#c53727"
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
             )}
 
-            {/* Data Point Dots and interactive hitboxes */}
-            {points.map(({ x, y, pt }, idx) => {
-              const isHovered = hoveredPoint?.timestamp === pt.timestamp;
+            {/* Typical Points */}
+            {typicalPoints.map(({ x, y, pt }, idx) => {
+              const isHovered = hoveredPoint?.label === pt.timeLabel && hoveredPoint.type === 'typical';
               return (
                 <g
-                  key={idx}
+                  key={`typical-${idx}`}
                   className="cursor-pointer"
-                  onMouseEnter={() => {
-                    setHoveredPoint(pt);
-                    setHoverX(x);
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredPoint(null);
-                    setHoverX(null);
-                  }}
+                  onMouseEnter={() =>
+                    setHoveredPoint({
+                      label: pt.timeLabel,
+                      count: pt.count,
+                      meal: pt.meal,
+                      isPeak: pt.isPeak,
+                      type: 'typical'
+                    })
+                  }
+                  onMouseLeave={() => setHoveredPoint(null)}
                 >
-                  {/* Invisible broad hitbox */}
-                  <rect
-                    x={x - 15}
-                    y={paddingTop}
-                    width={30}
-                    height={chartHeight}
-                    fill="transparent"
-                  />
-
-                  {/* Dot */}
                   <circle
                     cx={x}
                     cy={y}
-                    r={isHovered ? 6 : 3.5}
-                    fill={
-                      pt.status === 'HIGH'
-                        ? '#ef4444'
-                        : pt.status === 'MODERATE'
-                        ? '#f59e0b'
-                        : '#10b981'
-                    }
-                    stroke="#090d16"
+                    r={isHovered ? 6 : pt.isPeak ? 4.5 : 3}
+                    fill={pt.isPeak ? '#c53727' : '#ffffff'}
+                    stroke="#c53727"
                     strokeWidth="2"
-                    className="transition-all duration-150"
                   />
-
-                  {/* X-axis time label on every 2nd or 3rd point */}
-                  {idx % 3 === 0 && (
+                  {/* Time label under point for key marks */}
+                  {(idx % 2 === 0 || pt.isPeak) && (
                     <text
                       x={x}
-                      y={height - 15}
-                      fill="#64748b"
-                      fontSize="9.5"
+                      y={height - 12}
+                      fill={pt.isPeak ? '#c53727' : '#7a8077'}
+                      fontSize={pt.isPeak ? '9.5' : '8.5'}
+                      fontWeight={pt.isPeak ? 'bold' : 'normal'}
                       textAnchor="middle"
                       fontFamily="JetBrains Mono"
                     >
-                      {pt.time}
+                      {pt.hour}
                     </text>
                   )}
                 </g>
               );
             })}
 
-            {/* Interactive hover guideline */}
-            {hoverX !== null && (
-              <line
-                x1={hoverX}
-                y1={paddingTop}
-                x2={hoverX}
-                y2={paddingTop + chartHeight}
-                stroke="#38bdf8"
-                strokeWidth="1"
-                strokeDasharray="3 3"
-              />
+            {/* Live Telemetry Points (in comparison mode or overlay) */}
+            {viewMode === 'comparison' && (
+              <>
+                {livePathD && (
+                  <path
+                    d={livePathD}
+                    fill="none"
+                    stroke="#236b3d"
+                    strokeWidth="2"
+                    strokeDasharray="3 3"
+                  />
+                )}
+                {livePoints.map(({ x, y, pt }, idx) => {
+                  const isHovered = hoveredPoint?.label === pt.time && hoveredPoint.type === 'live';
+                  return (
+                    <g
+                      key={`live-${idx}`}
+                      className="cursor-pointer"
+                      onMouseEnter={() =>
+                        setHoveredPoint({
+                          label: pt.time,
+                          count: pt.count,
+                          meal: 'Live Hardware Session',
+                          type: 'live'
+                        })
+                      }
+                      onMouseLeave={() => setHoveredPoint(null)}
+                    >
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r={isHovered ? 6 : 4}
+                        fill="#236b3d"
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                      />
+                    </g>
+                  );
+                })}
+              </>
             )}
           </svg>
         </div>
 
-        {/* Hover Tooltip Popup */}
-        {hoveredPoint && (
-          <div className="mt-3 flex items-center justify-between text-xs font-mono bg-slate-900 border border-slate-700 px-3 py-2 rounded-lg text-slate-300 shadow-lg">
-            <span>
-              Timestamp: <strong className="text-white">{hoveredPoint.time}</strong>
+        {/* Hovered Tooltip */}
+        {hoveredPoint ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between text-xs font-mono bg-white border border-[#e5dac6] px-3.5 py-2 rounded-md text-[#2a2f29] shadow-xs gap-2">
+            <span className="flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-[#7a8077]" />
+              Time: <strong>{hoveredPoint.label}</strong>
             </span>
-            <span>
-              Queue Count: <strong className="text-cyan-400">{hoveredPoint.count} diners</strong>
+            <span className="flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-[#c53727]" />
+              Queue: <strong className="text-[#c53727]">{hoveredPoint.count} students in line</strong>
             </span>
-            <span>
-              Status:{' '}
-              <strong
-                className={
-                  hoveredPoint.status === 'HIGH'
-                    ? 'text-red-400'
-                    : hoveredPoint.status === 'MODERATE'
-                    ? 'text-amber-400'
-                    : 'text-emerald-400'
-                }
-              >
-                {hoveredPoint.status}
-              </strong>
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-[#236b3d]" />
+              Window: <strong>{hoveredPoint.meal}</strong> {hoveredPoint.isPeak && '(Peak Hour)'}
             </span>
+          </div>
+        ) : (
+          <div className="mt-3 text-[11px] font-mono text-[#7a8077] flex items-center justify-between">
+            <span>Chart displays expected counter queue line length throughout LH2 meal timings.</span>
+            <span className="text-[#236b3d] font-semibold">Green = Fast Service &bull; Red = Peak Rush</span>
           </div>
         )}
       </div>
 
-      {/* Dynamic Institutional Insight Banner */}
-      <div className="mt-4 p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl flex items-start space-x-3">
-        <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-        <div className="text-xs">
-          <strong className="text-slate-200 font-mono">Real-Time Queue Insight: </strong>
-          <span className="text-slate-400 leading-relaxed">{insightText}</span>
+      {/* Peak Hours Strategic Guidelines */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+        <div className="p-4 bg-[#ebf5ee] border border-[#b7dfc4] rounded-md text-xs space-y-1.5">
+          <div className="flex items-center space-x-2 text-[#1b5e35] font-semibold font-mono">
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Recommended Low-Wait Arrival Windows</span>
+          </div>
+          <ul className="text-[#1b5e35] space-y-1 font-mono text-[11px] pl-6 list-disc">
+            <li>Breakfast: 7:00 AM – 7:45 AM (Immediate counter service)</li>
+            <li>Lunch: 12:30 PM – 12:45 PM or 1:40 PM – 2:00 PM</li>
+            <li>Evening Snacks: 4:45 PM – 5:00 PM</li>
+            <li>Dinner: 7:15 PM – 7:45 PM or after 8:35 PM</li>
+          </ul>
+        </div>
+
+        <div className="p-4 bg-[#fdf2f0] border border-[#f5c7c1] rounded-md text-xs space-y-1.5">
+          <div className="flex items-center space-x-2 text-[#a82a1b] font-semibold font-mono">
+            <TrendingUp className="w-4 h-4" />
+            <span>Expected High-Rush Interval Times</span>
+          </div>
+          <ul className="text-[#a82a1b] space-y-1 font-mono text-[11px] pl-6 list-disc">
+            <li>Breakfast Rush: 8:00 AM – 8:30 AM (~26 students)</li>
+            <li>Lunch Rush: 1:00 PM – 1:30 PM (~36 students)</li>
+            <li>Evening Snacks: 5:15 PM – 5:35 PM (~22 students)</li>
+            <li>Dinner Rush: 8:00 PM – 8:30 PM (~34 students)</li>
+          </ul>
         </div>
       </div>
     </section>
