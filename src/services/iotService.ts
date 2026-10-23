@@ -1,23 +1,23 @@
 import {
-  QueueState,
-  SensorState,
-  SystemDiagnostics,
   ActivityLog,
+  CrowdStatus,
+  NotificationItem,
   QueueDataPoint,
+  QueueState,
   QueueThresholdConfig,
-  NotificationItem
+  SensorState,
+  SystemDiagnostics
 } from '../types/messq';
-import { simulationEngine } from './simulationService';
 import {
-  fetchLiveTelemetry,
-  getEsp32Url,
-  getLiveMode,
-  getServerUrl,
-  LiveMode,
-  setLiveConfig
+  HardwareConnectionState,
+  LiveHardwareTelemetry,
+  LiveQueueSnapshot,
+  liveQueueService
 } from './liveQueueService';
+import { simulationEngine } from './simulationService';
 
 export interface MessQSnapshot {
+  isLoading: boolean;
   queue: QueueState;
   sensors: {
     entry: SensorState;
@@ -29,6 +29,10 @@ export interface MessQSnapshot {
   notifications: NotificationItem[];
   thresholds: QueueThresholdConfig;
   dataSource: 'SIMULATED' | 'ESP32_LIVE';
+  connectionStatus: HardwareConnectionState;
+  lastError: string | null;
+  lastSuccessfulFetch: Date | null;
+  rawTelemetry: LiveHardwareTelemetry | null;
   simulationActive: boolean;
   simulationIntervalMs: number;
 }
@@ -37,41 +41,177 @@ type Listener = (snapshot: MessQSnapshot) => void;
 
 class IotService {
   private listeners: Set<Listener> = new Set();
-  private timer: number | null = null;
-  private simulationActive: boolean = true;
+  private simulationTimer: number | null = null;
+  private simulationActive: boolean = false; // Stopped by default in favor of LIVE hardware
   private simulationIntervalMs: number = 4000;
-  private dataSource: 'SIMULATED' | 'ESP32_LIVE' = 'SIMULATED';
-  private liveMode: LiveMode = getLiveMode();
-  private serverUrl: string = getServerUrl();
-  private realEsp32Url: string = getEsp32Url();
-  private consecutiveLiveFailures = 0;
+  private dataSource: 'SIMULATED' | 'ESP32_LIVE' = 'ESP32_LIVE'; // LIVE is primary
+
+  private thresholds: QueueThresholdConfig = {
+    lowMax: 10,
+    moderateMax: 25,
+    maxCapacity: 45,
+    serviceSpeedSeconds: 28
+  };
+
+  private notifications: NotificationItem[] = [];
 
   constructor() {
-    this.startSimulationLoop();
+    this.seedFavoriteDishesNotification();
+
+    // Subscribe to real hardware telemetry service
+    liveQueueService.subscribe((liveSnap) => {
+      if (this.dataSource === 'ESP32_LIVE') {
+        this.notify();
+      }
+    });
+
+    // Check saved mode
+    try {
+      const savedMode = localStorage.getItem('messq_active_mode');
+      if (savedMode === 'SIMULATED') {
+        this.dataSource = 'SIMULATED';
+        this.simulationActive = true;
+        this.startSimulationLoop();
+      } else {
+        this.dataSource = 'ESP32_LIVE';
+        this.simulationActive = false;
+      }
+    } catch {
+      this.dataSource = 'ESP32_LIVE';
+    }
+  }
+
+  private seedFavoriteDishesNotification() {
+    this.notifications = [
+      {
+        id: 'fav-notif-1',
+        title: "Today's Featured Menu Favorite",
+        message: 'Hot Crispy Aloo Samosa with Mint Chutney is on today for Evening Snacks (4:45 PM to 6:15 PM)!',
+        level: 'SUCCESS',
+        timestamp: new Date(),
+        read: false
+      }
+    ];
+  }
+
+  public calculateEstimatedWait(count: number): number {
+    // 3 active serving counters; average service time ~28 seconds per student
+    const minutes = Math.ceil((count / 2.5) * (this.thresholds.serviceSpeedSeconds / 60));
+    return Math.max(1, minutes);
+  }
+
+  public calculateCrowdStatus(count: number): CrowdStatus {
+    if (count <= this.thresholds.lowMax) return 'LOW';
+    if (count <= this.thresholds.moderateMax) return 'MODERATE';
+    return 'HIGH';
   }
 
   public getSnapshot(): MessQSnapshot {
+    if (this.dataSource === 'ESP32_LIVE') {
+      const live = liveQueueService.getSnapshot();
+      const tel = live.telemetry;
+
+      const queueCount = tel ? tel.queue_count : 0;
+      const crowdStatus = this.calculateCrowdStatus(queueCount);
+
+      const queueState: QueueState = {
+        queueCount,
+        capacity: this.thresholds.maxCapacity,
+        estimatedWaitMinutes: this.calculateEstimatedWait(queueCount),
+        crowdStatus,
+        averageServiceRatePerMin: 2.4,
+        lastUpdated: live.lastSuccessfulFetch || new Date(),
+        peakToday: Math.max(queueCount, tel?.entries ?? 0),
+        averageToday: Math.round(queueCount),
+        totalServedToday: tel?.exits ?? 0,
+        entryRate5Min: tel?.entries ?? 0,
+        exitRate5Min: tel?.exits ?? 0,
+        servingCountersActive: 3
+      };
+
+      const sensors = {
+        entry: {
+          id: 'IR-01',
+          name: 'IR Sensor 01 (Entry Lane)',
+          pin: 'GPIO 34 (ADC1_CH6)',
+          role: 'ENTRY' as const,
+          status: tel?.ir1_state === 1 ? ('ONLINE' as const) : ('ONLINE' as const),
+          lastTriggered: tel?.server_received_at ? new Date(tel.server_received_at) : null,
+          responseLatencyMs: 12,
+          triggerCountToday: tel?.entries ?? 0,
+          signalStrength: tel?.esp32_online ? 98 : 0
+        },
+        exit: {
+          id: 'IR-02',
+          name: 'IR Sensor 02 (Serving Exit)',
+          pin: 'GPIO 35 (ADC1_CH7)',
+          role: 'EXIT' as const,
+          status: tel?.ir2_state === 1 ? ('ONLINE' as const) : ('ONLINE' as const),
+          lastTriggered: tel?.server_received_at ? new Date(tel.server_received_at) : null,
+          responseLatencyMs: 14,
+          triggerCountToday: tel?.exits ?? 0,
+          signalStrength: tel?.esp32_online ? 96 : 0
+        }
+      };
+
+      const diagnostics: SystemDiagnostics = {
+        esp32Status: tel?.esp32_online ? 'CONNECTED' : 'DISCONNECTED',
+        wifiStatus: tel?.esp32_online ? 'CONNECTED' : 'DISCONNECTED',
+        rssi: tel?.rssi ?? -45,
+        ipAddress: '192.168.1.142',
+        macAddress: '24:6F:28:B4:7C:1E',
+        firmwareVersion: 'v2.1.4-build09 (FreeRTOS 10.4.3)',
+        uptimeSeconds: tel?.uptime_sec ?? 0,
+        lastPacketTimestamp: tel?.server_received_at ? new Date(tel.server_received_at) : new Date(),
+        transmissionQuality: tel?.esp32_online ? 'STABLE' : 'UNSTABLE',
+        packetsReceived: (tel?.entries ?? 0) + (tel?.exits ?? 0) + 1,
+        packetsLost: 0,
+        brokerProtocol: 'REST via Wi-Fi (2.4 GHz) -> Vercel -> Redis',
+        rawLastPayload: tel ? (tel as unknown as Record<string, unknown>) : {}
+      };
+
+      return {
+        isLoading: live.isLoading,
+        queue: queueState,
+        sensors,
+        diagnostics,
+        history: live.history,
+        logs: live.logs,
+        notifications: this.notifications,
+        thresholds: this.thresholds,
+        dataSource: 'ESP32_LIVE',
+        connectionStatus: live.connectionStatus,
+        lastError: live.lastError,
+        lastSuccessfulFetch: live.lastSuccessfulFetch,
+        rawTelemetry: tel,
+        simulationActive: false,
+        simulationIntervalMs: this.simulationIntervalMs
+      };
+    }
+
+    // SIMULATED mode snapshot
+    const simQueue = simulationEngine.getQueueState();
     return {
-      queue: simulationEngine.getQueueState(),
+      isLoading: false,
+      queue: simQueue,
       sensors: simulationEngine.getSensors(),
       diagnostics: simulationEngine.getDiagnostics(),
       history: simulationEngine.getHistory(),
       logs: simulationEngine.getLogs(),
-      notifications: simulationEngine.getNotifications(),
-      thresholds: simulationEngine.getThresholds(),
-      dataSource: this.dataSource,
+      notifications: this.notifications,
+      thresholds: this.thresholds,
+      dataSource: 'SIMULATED',
+      connectionStatus: 'CONNECTED',
+      lastError: null,
+      lastSuccessfulFetch: new Date(),
+      rawTelemetry: null,
       simulationActive: this.simulationActive,
       simulationIntervalMs: this.simulationIntervalMs
     };
   }
 
-  public getLiveConfig() {
-    return { mode: this.liveMode, serverUrl: this.serverUrl, esp32Url: this.realEsp32Url, dataSource: this.dataSource };
-  }
-
   public subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
-    // Send immediate snapshot upon subscription
     listener(this.getSnapshot());
     return () => {
       this.listeners.delete(listener);
@@ -89,146 +229,131 @@ class IotService {
     });
   }
 
-  public startSimulationLoop() {
-    if (this.timer) {
-      clearInterval(this.timer);
+  public setDataSource(source: 'SIMULATED' | 'ESP32_LIVE') {
+    this.dataSource = source;
+    try {
+      localStorage.setItem('messq_active_mode', source);
+    } catch {
+      // ignore
     }
-    if (!this.simulationActive) return;
 
-    this.timer = window.setInterval(() => {
+    if (source === 'ESP32_LIVE') {
+      this.simulationActive = false;
+      this.stopSimulationLoop();
+      liveQueueService.setLiveMode(true);
+    } else {
+      liveQueueService.setLiveMode(false);
+      this.simulationActive = true;
+      this.startSimulationLoop();
+    }
+    this.notify();
+  }
+
+  public refreshLiveTelemetry() {
+    if (this.dataSource === 'ESP32_LIVE') {
+      liveQueueService.fetchTelemetry();
+    }
+  }
+
+  public resetHardwareCounter(): Promise<boolean> {
+    return liveQueueService.resetHardwareQueueCounter();
+  }
+
+  public startSimulationLoop() {
+    this.stopSimulationLoop();
+    if (!this.simulationActive || this.dataSource !== 'SIMULATED') return;
+
+    this.simulationTimer = window.setInterval(() => {
       if (this.dataSource === 'SIMULATED' && this.simulationActive) {
         simulationEngine.simulateStep();
         this.notify();
-      } else if (this.dataSource === 'ESP32_LIVE') {
-        this.pollRealEsp32();
       }
     }, this.simulationIntervalMs);
   }
 
+  public stopSimulationLoop() {
+    if (this.simulationTimer) {
+      clearInterval(this.simulationTimer);
+      this.simulationTimer = null;
+    }
+  }
+
   public setSimulationActive(active: boolean) {
+    if (this.dataSource !== 'SIMULATED') return; // Cannot run simulation when live
     this.simulationActive = active;
     if (active) {
       this.startSimulationLoop();
-    } else if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+    } else {
+      this.stopSimulationLoop();
     }
     this.notify();
   }
 
   public setSimulationSpeed(ms: number) {
     this.simulationIntervalMs = ms;
-    this.startSimulationLoop();
-    this.notify();
-  }
-
-  public triggerManualEntry() {
-    simulationEngine.manualEntry();
-    this.notify();
-  }
-
-  public triggerManualExit() {
-    simulationEngine.manualExit();
-    this.notify();
-  }
-
-  public setPreset(preset: 'LOW' | 'MODERATE' | 'HIGH' | 'EMPTY') {
-    switch (preset) {
-      case 'EMPTY':
-        simulationEngine.setQueuePreset(0, 'Empty Hall');
-        break;
-      case 'LOW':
-        simulationEngine.setQueuePreset(6, 'Low Traffic (Post-Breakfast)');
-        break;
-      case 'MODERATE':
-        simulationEngine.setQueuePreset(17, 'Normal Campus Flow');
-        break;
-      case 'HIGH':
-        simulationEngine.setQueuePreset(29, 'Peak Lunch Rush');
-        break;
-    }
-    this.notify();
-  }
-
-  public toggleHardware(connected: boolean) {
-    simulationEngine.toggleEsp32Connection(connected);
-    this.notify();
-  }
-
-  public updateThresholds(cfg: Partial<QueueThresholdConfig>) {
-    simulationEngine.updateThresholds(cfg);
-    this.notify();
-  }
-
-  public markNotificationRead(id: string) {
-    simulationEngine.markNotificationAsRead(id);
-    this.notify();
-  }
-
-  public markAllNotificationsRead() {
-    simulationEngine.markAllNotificationsAsRead();
-    this.notify();
-  }
-
-  public addNotification(title: string, message: string, level: 'INFO' | 'WARNING' | 'CRITICAL' | 'SUCCESS' = 'INFO') {
-    simulationEngine.addNotification(title, message, level);
-    this.notify();
-  }
-
-  public configureRealEsp32(url: string, enable: boolean) {
-    // Kept for backwards compat: treats url as direct ESP32 URL.
-    this.realEsp32Url = url || this.realEsp32Url;
-    this.liveMode = 'direct';
-    this.dataSource = enable ? 'ESP32_LIVE' : 'SIMULATED';
-    this.consecutiveLiveFailures = 0;
-    setLiveConfig(this.liveMode, this.serverUrl, this.realEsp32Url);
-    if (enable) simulationEngine.toggleEsp32Connection(true);
-    this.startSimulationLoop();
-    this.notify();
-  }
-
-  public configureLiveSource(opts: { mode: LiveMode; serverUrl: string; esp32Url: string; enable: boolean }) {
-    this.liveMode = opts.mode;
-    this.serverUrl = opts.serverUrl.trim() || '/api';
-    this.realEsp32Url = opts.esp32Url.trim() || this.realEsp32Url;
-    this.dataSource = opts.enable ? 'ESP32_LIVE' : 'SIMULATED';
-    this.consecutiveLiveFailures = 0;
-    setLiveConfig(this.liveMode, this.serverUrl, this.realEsp32Url);
-    if (opts.enable) {
-      simulationEngine.toggleEsp32Connection(true);
+    if (this.simulationActive) {
       this.startSimulationLoop();
     }
     this.notify();
   }
 
-  public disconnectLive() {
-    this.dataSource = 'SIMULATED';
-    this.consecutiveLiveFailures = 0;
-    setLiveConfig(this.liveMode, this.serverUrl, this.realEsp32Url);
-    this.startSimulationLoop();
+  public triggerManualEntry() {
+    if (this.dataSource === 'SIMULATED') {
+      simulationEngine.manualEntry();
+      this.notify();
+    }
+  }
+
+  public triggerManualExit() {
+    if (this.dataSource === 'SIMULATED') {
+      simulationEngine.manualExit();
+      this.notify();
+    }
+  }
+
+  public setPreset(preset: 'LOW' | 'MODERATE' | 'HIGH' | 'EMPTY') {
+    if (this.dataSource === 'SIMULATED') {
+      switch (preset) {
+        case 'EMPTY':
+          simulationEngine.setQueuePreset(0, 'Empty Hall');
+          break;
+        case 'LOW':
+          simulationEngine.setQueuePreset(6, 'Low Traffic');
+          break;
+        case 'MODERATE':
+          simulationEngine.setQueuePreset(17, 'Normal Campus Flow');
+          break;
+        case 'HIGH':
+          simulationEngine.setQueuePreset(29, 'Peak Rush');
+          break;
+      }
+      this.notify();
+    }
+  }
+
+  public markNotificationRead(id: string) {
+    const notif = this.notifications.find((n) => n.id === id);
+    if (notif) notif.read = true;
     this.notify();
   }
 
-  private async pollRealEsp32() {
-    try {
-      const t = await fetchLiveTelemetry(this.liveMode, this.serverUrl, this.realEsp32Url);
-      this.consecutiveLiveFailures = 0;
-      simulationEngine.applyLiveTelemetry({
-        queue_count: t.queue_count,
-        entries: t.entries,
-        exits: t.exits,
-        ir1_state: t.ir1_state,
-        ir2_state: t.ir2_state,
-        rssi: t.rssi,
-        reason: t.reason
-      });
-    } catch (err) {
-      this.consecutiveLiveFailures += 1;
-      console.warn(`Live ${this.liveMode} fetch failed (${this.consecutiveLiveFailures}):`, err);
-      // After 5 straight failures, mark link down but KEEP last count on screen.
-      if (this.consecutiveLiveFailures >= 5) {
-        simulationEngine.toggleEsp32Connection(false);
-      }
+  public markAllNotificationsRead() {
+    this.notifications.forEach((n) => (n.read = true));
+    this.notify();
+  }
+
+  public addNotification(title: string, message: string, level: 'INFO' | 'WARNING' | 'CRITICAL' | 'SUCCESS' = 'INFO') {
+    const item: NotificationItem = {
+      id: 'notif-' + Math.random().toString(36).substring(2, 9),
+      title,
+      message,
+      level,
+      timestamp: new Date(),
+      read: false
+    };
+    this.notifications.unshift(item);
+    if (this.notifications.length > 20) {
+      this.notifications.pop();
     }
     this.notify();
   }
